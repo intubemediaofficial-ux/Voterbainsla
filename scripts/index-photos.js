@@ -20,7 +20,7 @@ async function worker() {
     const i = next++;
     if (i >= files.length) return;
     const source = files[i];
-    if (!process.env.FORCE && readyPage.get(path.basename(source))) { completed++; continue; }
+    if (!process.env.FORCE && readyPage.get(srcName(source))) { completed++; continue; }
     const hash = crypto.createHash('sha1').update(fs.readFileSync(source)).digest('hex').slice(0, 12);
     const storedName = `${hash}${path.extname(source).toLowerCase() || '.jpg'}`;
     const dest = path.join(uploadDir, storedName);
