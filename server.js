@@ -43,17 +43,20 @@ app.get('/api/stats', (_req, res) => {
 const allVoters = db.prepare(`SELECT v.*, p.total_pages, p.assembly_name, p.polling_station, p.stored_file
   FROM voters v JOIN pages p ON p.id=v.page_id`);
 
+// Each field keeps its other OCR readings (name_alt, '|' separated) so a misread spelling still finds the voter.
+const alts = (main, alt) => [main, ...String(alt || '').split('|')].map(s => match.words(s)).filter(w => w.length);
+const best = (qw, list) => Math.max(0, ...list.map(fw => match.fieldScore(qw, fw)));
 let cache = { sig: '', rows: [] };
 function allRows() {
-  const sig = JSON.stringify(db.prepare('SELECT count(*) c, max(id) m FROM voters').get());
+  const sig = JSON.stringify(db.prepare("SELECT count(*) c, max(id) m, total(length(name)+length(coalesce(relative_name,''))+length(coalesce(name_alt,''))+length(coalesce(relative_alt,''))) l FROM voters").get());
   if (sig !== cache.sig) {
-    cache = { sig, rows: allVoters.all().map(v => ({ ...v, nw: match.words(v.name), rw: match.words(v.relative_name) })) };
+    cache = { sig, rows: allVoters.all().map(v => ({ ...v, nw: alts(v.name, v.name_alt), rw: alts(v.relative_name, v.relative_alt) })) };
   }
   return cache.rows;
 }
 const order = (x, y) => y.score - x.score || Number(x.ward_no) - Number(y.ward_no) ||
   (Number(x.page_no) || 999) - (Number(y.page_no) || 999) || Number(x.serial_no) - Number(y.serial_no);
-const clean = ({ nw, rw, ...v }) => v;
+const clean = ({ nw, rw, name_alt, relative_alt, name_norm, relative_norm, name_key, relative_key, ...v }) => v;
 
 app.get('/api/ward/:ward', (req, res) => {
   const ward = String(req.params.ward).trim();
@@ -80,10 +83,10 @@ app.get('/api/search', (req, res) => {
     const nq = match.words(parts[0]), rq = match.words(parts.slice(1).join(' '));
     const rows = [];
     for (const v of voters()) {
-      const a = match.fieldScore(nq, v.nw);
+      const a = best(nq, v.nw);
       if (!a) continue;
-      const b = match.fieldScore(rq, v.rw);
-      const near = b ? 0 : Math.round(40 * Math.max(0, ...v.rw.map(w => Math.max(...rq.map(r => match.sim(r, w))))));
+      const b = best(rq, v.rw);
+      const near = b ? 0 : Math.round(40 * Math.max(0, ...v.rw.flat().map(w => Math.max(...rq.map(r => match.sim(r, w))))));
       rows.push({ ...v, score: a + (b ? b + 50 : near), rel_match: b > 0 });
     }
     rows.sort(order);
@@ -92,7 +95,7 @@ app.get('/api/search', (req, res) => {
   const qw = match.words(q);
   const rows = [];
   for (const v of voters()) {
-    const a = match.fieldScore(qw, v.nw), b = match.fieldScore(qw, v.rw) * 0.9;
+    const a = best(qw, v.nw), b = best(qw, v.rw) * 0.9;
     if (a || b) rows.push({ ...v, score: Math.max(a, b), matched: a >= b ? 'name' : 'relative' });
   }
   res.json({ query: q, results: rows.sort(order).slice(0, 120).map(clean) });
