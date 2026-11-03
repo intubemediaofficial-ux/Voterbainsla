@@ -19,3 +19,13 @@
 .row.given{background:#f1fcf7}
 .slip:disabled,.tick:disabled{opacity:.6}
 .slipBar{margin-top:14px}
+
+.areaTabs{display:flex;gap:10px;justify-content:center;margin:18px auto 4px;max-width:560px}
+.areaTabs button{flex:1 1 0;min-width:0;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.08);color:#fff;border-radius:14px;padding:10px 14px;font-weight:800;font-size:15px;cursor:pointer;text-align:center;line-height:1.25}
+.areaTabs small{display:block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
+.areaTabs button.on{background:#fff;color:#0b1f44;border-color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.search.relSearch{margin-top:10px}
+.wardSearch.wardRel{margin-top:8px}
+.simHead{grid-column:1/-1;font-weight:800;color:#9a4b05;background:#fff7ed;border:1px dashed #fdba74;border-radius:12px;padding:10px 14px}
+.uploadArea{font-weight:800;color:#0b7a52}
+.del{font-style:normal;font-size:11px;font-weight:800;color:#b91c1c;background:#fee2e2;border-radius:6px;padding:2px 6px;vertical-align:middle}
