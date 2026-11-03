@@ -37,7 +37,7 @@ app.get('/api/stats', (_req, res) => {
   const row = db.prepare(`SELECT COUNT(*) pages, COALESCE(SUM(record_count),0) voters,
     COALESCE(SUM(status='processing'),0) processing, COALESCE(SUM(status='error'),0) errors FROM pages`).get();
   const wards = db.prepare("SELECT DISTINCT ward_no FROM pages WHERE status='ready' AND ward_no<>'' ORDER BY CAST(ward_no AS INTEGER)").all().map(x => x.ward_no);
-  res.json({ ...row, wards });
+  res.json({ ...row, wards, slips: slipStats() });
 });
 
 const allVoters = db.prepare(`SELECT v.*, p.total_pages, p.assembly_name, p.polling_station, p.stored_file
@@ -58,10 +58,40 @@ const order = (x, y) => y.score - x.score || Number(x.ward_no) - Number(y.ward_n
   (Number(x.page_no) || 999) - (Number(y.page_no) || 999) || Number(x.serial_no) - Number(y.serial_no);
 const clean = ({ nw, rw, name_alt, relative_alt, name_norm, relative_norm, name_key, relative_key, ...v }) => v;
 
+// Slip status is keyed by Voter ID (falls back to page+serial) so it survives re-OCR of a page and covers duplicate rows.
+const slipKey = v => String(v.voter_id || '').replace(/\s/g, '').toUpperCase() || `P${v.page_id}-S${v.serial_no}`;
+const slipMap = () => new Map(db.prepare('SELECT * FROM slips').all().map(s => [s.vkey, s]));
+const withSlip = () => { const m = slipMap(); return v => { const s = m.get(slipKey(v)); return { ...clean(v), slip: s ? { at: s.given_at, by: s.given_by } : null }; }; };
+function slipStats() {
+  const m = slipMap(), seen = new Set(), wards = {};
+  let given = 0;
+  for (const v of allRows()) {
+    const k = slipKey(v);
+    const w = wards[v.ward_no] || (wards[v.ward_no] = { total: 0, given: 0, seen: new Set() });
+    if (!w.seen.has(k)) { w.seen.add(k); w.total++; if (m.has(k)) w.given++; }
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (m.has(k)) given++;
+  }
+  for (const w of Object.values(wards)) delete w.seen;
+  return { total: seen.size, given, wards };
+}
+
+app.post('/api/slip', (req, res) => {
+  const v = db.prepare('SELECT page_id, serial_no, voter_id FROM voters WHERE id=?').get(Number(req.body && req.body.id));
+  if (!v) return res.status(404).json({ error: 'Voter not found' });
+  const k = slipKey(v), given = !!req.body.given, by = String(req.body.by || '').trim().slice(0, 40) || null;
+  if (given) db.prepare('INSERT INTO slips(vkey, given_by) VALUES(?, ?) ON CONFLICT(vkey) DO NOTHING').run(k, by);
+  else db.prepare('DELETE FROM slips WHERE vkey=?').run(k);
+  db.prepare('INSERT INTO slip_log(vkey, given, by_name) VALUES(?, ?, ?)').run(k, given ? 1 : 0, by);
+  const s = db.prepare('SELECT * FROM slips WHERE vkey=?').get(k);
+  res.json({ slip: s ? { at: s.given_at, by: s.given_by } : null, stats: slipStats() });
+});
+
 app.get('/api/ward/:ward', (req, res) => {
   const ward = String(req.params.ward).trim();
   const rows = allRows().filter(v => v.ward_no === ward).map(v => ({ ...v, score: 0 })).sort(order);
-  res.json({ ward, count: rows.length, results: rows.map(clean) });
+  res.json({ ward, count: rows.length, results: rows.map(withSlip()) });
 });
 
 app.get('/api/search', (req, res) => {
@@ -71,12 +101,12 @@ app.get('/api/search', (req, res) => {
   if (q.length < 2) return res.json({ query: q, results: [] });
   if (/^\d+$/.test(q)) {
     const rows = voters().filter(v => v.serial_no === q || v.house_no === q).map(v => ({ ...v, score: v.serial_no === q ? 100 : 50 }));
-    return res.json({ query: q, results: rows.sort(order).slice(0, 80).map(clean) });
+    return res.json({ query: q, results: rows.sort(order).slice(0, 80).map(withSlip()) });
   }
   if (/\d/.test(q) && /^[a-z0-9]+$/i.test(q)) {
     const id = q.toUpperCase();
     const rows = voters().filter(v => (v.voter_id || '').toUpperCase().includes(id)).map(v => ({ ...v, score: 100 }));
-    return res.json({ query: q, results: rows.sort(order).slice(0, 80).map(clean) });
+    return res.json({ query: q, results: rows.sort(order).slice(0, 80).map(withSlip()) });
   }
   const parts = q.split(/\s*[-\u2013\u2014\/]+\s*/).filter(Boolean);
   if (parts.length >= 2) {
@@ -90,7 +120,7 @@ app.get('/api/search', (req, res) => {
       rows.push({ ...v, score: a + (b ? b + 50 : near), rel_match: b > 0 });
     }
     rows.sort(order);
-    return res.json({ query: q, mode: 'name+relative', exact: rows.some(r => r.rel_match), results: rows.slice(0, 120).map(clean) });
+    return res.json({ query: q, mode: 'name+relative', exact: rows.some(r => r.rel_match), results: rows.slice(0, 120).map(withSlip()) });
   }
   const qw = match.words(q);
   const rows = [];
@@ -98,7 +128,7 @@ app.get('/api/search', (req, res) => {
     const a = best(qw, v.nw), b = best(qw, v.rw) * 0.9;
     if (a || b) rows.push({ ...v, score: Math.max(a, b), matched: a >= b ? 'name' : 'relative' });
   }
-  res.json({ query: q, results: rows.sort(order).slice(0, 120).map(clean) });
+  res.json({ query: q, results: rows.sort(order).slice(0, 120).map(withSlip()) });
 });
 
 app.get('/api/source/:id', (req, res) => {
