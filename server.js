@@ -76,10 +76,11 @@ function comboSearch(namePart, relPart) {
     const a = partScore(v.name_norm || '', v.name_key, n1, k1);
     if (!a) continue;
     const b = partScore(v.relative_norm || '', v.relative_key, n2, k2);
-    scored.push({ ...v, score: a + b, rel_match: b > 0 });
+    const rk = (v.relative_key || '').replace(/\s/g, '');
+    const near = b ? 0 : Math.round(50 * Math.max(editSim(rk, k2), editSim((v.relative_norm || ''), n2)));
+    scored.push({ ...v, score: a + (b || near), rel_match: b > 0 });
   }
-  const both = scored.filter(v => v.rel_match);
-  return (both.length ? both : scored).sort((x, y) => y.score - x.score ||
+  return scored.sort((x, y) => y.score - x.score ||
     Number(x.ward_no) - Number(y.ward_no) || Number(x.page_no) - Number(y.page_no) ||
     Number(x.serial_no) - Number(y.serial_no)).slice(0, 80);
 }
