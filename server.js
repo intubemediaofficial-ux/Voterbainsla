@@ -43,7 +43,7 @@ app.get('/api/search', (req, res) => {
   const n = normText(q);
   const k = anyKey(q).replace(/\s/g, '');
   const digits = q.replace(/\D/g, '');
-  const rows = db.prepare(`SELECT v.*, p.assembly_name, p.polling_station, p.stored_file,
+  const rows = db.prepare(`SELECT v.*, p.total_pages, p.assembly_name, p.polling_station, p.stored_file,
     CASE
       WHEN v.name_norm = @n THEN 100
       WHEN replace(v.name_key,' ','') = @k AND @k <> '' THEN 96

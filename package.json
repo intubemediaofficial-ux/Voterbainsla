@@ -10,7 +10,7 @@
     "check": "node --check server.js && node --check scripts/index-photos.js && node --check public/app.js"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.1",
+    "better-sqlite3": "^11.10.0",
     "express": "^5.1.0",
     "multer": "^2.0.2"
   }

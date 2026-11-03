@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { extractPage } = require('../lib/ocr');
-const { saveExtraction, failPage, upsertPage } = require('../lib/db');
+const { db, saveExtraction, failPage, upsertPage } = require('../lib/db');
+const readyPage = db.prepare("SELECT 1 FROM pages WHERE source_file=? AND status='ready'");
 
 const listFile = process.argv[2] || path.join(__dirname, '..', 'images.list');
 const files = fs.readFileSync(listFile, 'utf8').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -17,6 +18,7 @@ async function worker() {
     const i = next++;
     if (i >= files.length) return;
     const source = files[i];
+    if (!process.env.FORCE && readyPage.get(path.basename(source))) { completed++; continue; }
     const hash = crypto.createHash('sha1').update(fs.readFileSync(source)).digest('hex').slice(0, 12);
     const storedName = `${hash}${path.extname(source).toLowerCase() || '.jpg'}`;
     const dest = path.join(uploadDir, storedName);
@@ -35,7 +37,6 @@ async function worker() {
   }
 }
 Promise.all(Array.from({ length: concurrency }, worker)).then(() => {
-  const { db } = require('../lib/db');
   const stats = db.prepare("SELECT COUNT(*) pages, SUM(record_count) voters, SUM(status='error') errors FROM pages").get();
   console.log('Done:', stats);
 });
