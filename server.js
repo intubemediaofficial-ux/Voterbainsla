@@ -42,7 +42,7 @@ const allVoters = db.prepare(`SELECT v.*, p.total_pages, p.assembly_name, p.poll
   FROM voters v JOIN pages p ON p.id=v.page_id`);
 
 let cache = { sig: '', rows: [] };
-function voters() {
+function allRows() {
   const sig = JSON.stringify(db.prepare('SELECT count(*) c, max(id) m FROM voters').get());
   if (sig !== cache.sig) {
     cache = { sig, rows: allVoters.all().map(v => ({ ...v, nw: match.words(v.name), rw: match.words(v.relative_name) })) };
@@ -50,11 +50,19 @@ function voters() {
   return cache.rows;
 }
 const order = (x, y) => y.score - x.score || Number(x.ward_no) - Number(y.ward_no) ||
-  Number(x.page_no) - Number(y.page_no) || Number(x.serial_no) - Number(y.serial_no);
+  (Number(x.page_no) || 999) - (Number(y.page_no) || 999) || Number(x.serial_no) - Number(y.serial_no);
 const clean = ({ nw, rw, ...v }) => v;
+
+app.get('/api/ward/:ward', (req, res) => {
+  const ward = String(req.params.ward).trim();
+  const rows = allRows().filter(v => v.ward_no === ward).map(v => ({ ...v, score: 0 })).sort(order);
+  res.json({ ward, count: rows.length, results: rows.map(clean) });
+});
 
 app.get('/api/search', (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 120);
+  const ward = String(req.query.ward || '').trim();
+  const voters = () => ward ? allRows().filter(v => v.ward_no === ward) : allRows();
   if (q.length < 2) return res.json({ query: q, results: [] });
   if (/^\d+$/.test(q)) {
     const rows = voters().filter(v => v.serial_no === q || v.house_no === q).map(v => ({ ...v, score: v.serial_no === q ? 100 : 50 }));
