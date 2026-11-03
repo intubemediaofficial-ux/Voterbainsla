@@ -33,7 +33,7 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], m
 
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
-const AREAS = { ladpura: 'Ladpura, Surgarh', kheldi: 'Kheldi' };
+const AREAS = { ladpura: 'Ladpura, Surgarh', kheldi: 'Kheldi', ghudla: 'Ghudla' };
 const areaOf = req => { const a = String((req.query && req.query.area) || (req.body && req.body.area) || ''); return AREAS[a] ? a : 'ladpura'; };
 
 app.get('/api/stats', (req, res) => {
