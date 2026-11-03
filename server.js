@@ -31,6 +31,8 @@ app.use((_req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], maxAge: 0 }));
 
+app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
+
 app.get('/api/stats', (_req, res) => {
   const row = db.prepare(`SELECT COUNT(*) pages, COALESCE(SUM(record_count),0) voters,
     COALESCE(SUM(status='processing'),0) processing, COALESCE(SUM(status='error'),0) errors FROM pages`).get();
