@@ -1,0 +1,17 @@
+{
+  "name": "bainsla-voter-search",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Search photographed electoral rolls by voter or relative name",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "index:photos": "node scripts/index-photos.js",
+    "check": "node --check server.js && node --check scripts/index-photos.js && node --check public/app.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "express": "^5.1.0",
+    "multer": "^2.0.2"
+  }
+}
