@@ -3,6 +3,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { extractPage } = require('../lib/ocr');
 const { db, saveExtraction, failPage, upsertPage } = require('../lib/db');
+// AREA=kheldi indexes into another gram panchayat; its file names get an area prefix so they never clash.
+const srcName = f => (process.env.AREA && process.env.AREA !== 'ladpura' ? `${process.env.AREA}/` : '') + path.basename(f);
 const readyPage = db.prepare("SELECT 1 FROM pages WHERE source_file=? AND status='ready'");
 
 const listFile = process.argv[2] || path.join(__dirname, '..', 'images.list');
@@ -25,11 +27,11 @@ async function worker() {
     if (!fs.existsSync(dest)) fs.copyFileSync(source, dest);
     try {
       const data = await extractPage(dest);
-      const saved = saveExtraction(path.basename(source), storedName, data);
+      const saved = saveExtraction(srcName(source), storedName, data, process.env.AREA);
       completed++;
       console.log(`[${completed}/${files.length}] ${path.basename(source)} -> ward ${saved.ward}, page ${saved.page}, ${saved.count} voters`);
     } catch (err) {
-      const id = Number(upsertPage.get({ source_file: path.basename(source), stored_file: storedName }).id);
+      const id = Number(upsertPage.get({ source_file: srcName(source), stored_file: storedName, area: process.env.AREA || null }).id);
       failPage.run(String(err.message).slice(0, 1000), id);
       completed++;
       console.error(`[${completed}/${files.length}] FAILED ${path.basename(source)}: ${err.message}`);
