@@ -29,7 +29,7 @@ app.use((_req, res, next) => {
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   next();
 });
-app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], maxAge: '5m' }));
+app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], maxAge: 0 }));
 
 app.get('/api/stats', (_req, res) => {
   const row = db.prepare(`SELECT COUNT(*) pages, COALESCE(SUM(record_count),0) voters,
