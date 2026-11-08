@@ -2,6 +2,8 @@
 // Usage: node scripts/sec-feed.js <dir with <dist>/<ps>/<gp>.json manifests and ward PDFs>
 const fs = require('fs');
 const path = require('path');
+try { process.loadEnvFile(process.env.ENV_FILE || path.join(__dirname, '..', 'data', '.env')); } catch {}
+const auth = { 'x-admin-key': process.env.ADMIN_PASSWORD || '' };
 const { db } = require('../lib/db');
 const { resolveArea } = require('../lib/ingest');
 
@@ -29,7 +31,7 @@ function busy() {
   if (db.prepare("SELECT 1 FROM jobs WHERE status IN ('queued','running') LIMIT 1").get()) return true;
   // Pages waiting on Gemini quota go first; the server retries them every 30 min, nudge ones past its retry cap.
   const stuck = db.prepare("SELECT id, attempts FROM jobs WHERE status='partial' AND id IN (SELECT job_id FROM sec_feed)").all();
-  for (const j of stuck.filter(j => j.attempts >= 48)) fetch(`http://127.0.0.1:${PORT}/api/jobs/${j.id}/retry`, { method: 'POST' }).catch(() => {});
+  for (const j of stuck.filter(j => j.attempts >= 48)) fetch(`http://127.0.0.1:${PORT}/api/jobs/${j.id}/retry`, { method: 'POST', headers: auth }).catch(() => {});
   return stuck.length > 0;
 }
 
@@ -45,7 +47,7 @@ async function feedOne() {
       const form = new FormData();
       form.append('area', area);
       form.append('photos', new Blob([fs.readFileSync(file)], { type: 'application/pdf' }), `${titleCase(m.name)}-Ward-${w.ward}.pdf`);
-      const r = await fetch(`http://127.0.0.1:${PORT}/api/upload`, { method: 'POST', body: form });
+      const r = await fetch(`http://127.0.0.1:${PORT}/api/upload`, { method: 'POST', body: form, headers: auth });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || r.status);
       markFed.run(file, area, j.jobs[0]);

@@ -83,3 +83,9 @@ body.noScroll{overflow:hidden}
 .gpDist select{font:inherit;font-size:16px;text-transform:none;letter-spacing:0;font-weight:700;color:var(--ink);border:1px solid var(--line);background:#f8fbff;border-radius:12px;padding:11px 10px}
 div.distHead{cursor:default}div.distHead::after{content:none}
 .gpLbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 5px}
+
+.hBtns{display:flex;gap:8px;flex-shrink:0}
+.adminTab{margin-top:auto;border-top:1px solid var(--line);color:var(--muted)}
+.reqForm{display:grid;gap:12px}.reqForm label{display:grid;gap:6px;font-size:13px;font-weight:700;color:var(--muted)}.reqForm input{font:inherit;font-size:16px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#f8fbff;color:var(--ink);width:100%}
+@media(max-width:400px){.hBtns{gap:6px}.hBtns .ghost{padding:8px}}
+.sheet{max-height:calc(100vh - 36px);overflow:auto}
