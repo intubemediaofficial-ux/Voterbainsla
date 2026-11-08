@@ -47,7 +47,10 @@ const areaOf = req => { const a = String((req.query && req.query.area) || (req.b
 
 app.get('/api/areas', (_req, res) => {
   const counts = Object.fromEntries(db.prepare('SELECT area, COALESCE(SUM(record_count),0) voters FROM pages GROUP BY area').all().map(r => [r.area, r.voters]));
-  res.json({ home: HOME_AREA, areas: AREA_LIST.map(a => ({ ...a, voters: counts[a.key] || 0 })) });
+  // GPs with no voter data yet stay out of the menu, and the home page falls back to the first GP that has data.
+  const areas = AREA_LIST.map(a => ({ ...a, voters: counts[a.key] || 0 })).filter(a => a.voters > 0);
+  const home = (areas.find(a => a.key === HOME_AREA) || areas[0] || { key: HOME_AREA }).key;
+  res.json({ home, areas });
 });
 
 app.get('/api/stats', (req, res) => {
