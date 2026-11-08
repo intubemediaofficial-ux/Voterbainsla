@@ -23,7 +23,20 @@ const upload = multer({
   fileFilter: (_req, file, cb) => cb(null, /^(image\/(jpeg|png|webp)|application\/pdf)$/.test(file.mimetype))
 });
 
+// Only the admin (password in data/.env as ADMIN_PASSWORD) can upload rolls or see the upload queue and GP requests.
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const adminToken = ADMIN_PASSWORD && crypto.createHmac('sha256', ADMIN_PASSWORD).update('voter-admin').digest('hex');
+const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const isAdmin = req => {
+  if (!adminToken) return false;
+  const c = /(?:^|;\s*)adm=([0-9a-f]+)/.exec(req.headers.cookie || '');
+  return (c && same(c[1], adminToken)) || same(String(req.headers['x-admin-key'] || ''), ADMIN_PASSWORD);
+};
+const adminOnly = (req, res, next) => isAdmin(req) ? next() : res.status(401).json({ error: 'Admin login required.' });
+db.exec(`CREATE TABLE IF NOT EXISTS gp_requests (id INTEGER PRIMARY KEY, gp TEXT NOT NULL, district TEXT, name TEXT, phone TEXT, done INTEGER DEFAULT 0, at TEXT DEFAULT CURRENT_TIMESTAMP)`);
+
 app.disable('x-powered-by');
+app.set('trust proxy', 'loopback');
 app.use(express.json({ limit: '1mb' }));
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -201,7 +214,32 @@ app.get('/api/source/:id', (req, res) => {
   res.sendFile(file);
 });
 
-app.post('/api/upload', upload.array('photos', 100), (req, res) => {
+app.get('/api/admin', (req, res) => res.json({ admin: isAdmin(req) }));
+const logins = new Map();
+app.post('/api/admin/login', (req, res) => {
+  const t = (logins.get(req.ip) || []).filter(x => Date.now() - x < 15 * 60e3);
+  if (t.length >= 10) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes.' });
+  if (!adminToken || !same(String((req.body && req.body.password) || ''), ADMIN_PASSWORD)) { logins.set(req.ip, [...t, Date.now()]); return res.status(401).json({ error: 'Wrong password.' }); }
+  res.setHeader('Set-Cookie', `adm=${adminToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${180 * 86400}`);
+  res.json({ admin: true });
+});
+app.post('/api/admin/logout', (_req, res) => { res.setHeader('Set-Cookie', 'adm=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0'); res.json({ admin: false }); });
+
+const asked = new Map();
+app.post('/api/requests', (req, res) => {
+  const f = k => String((req.body && req.body[k]) || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const gp = f('gp');
+  if (gp.length < 2) return res.status(400).json({ error: 'Write the Gram Panchayat name.' });
+  const t = (asked.get(req.ip) || []).filter(x => Date.now() - x < 3600e3);
+  if (t.length >= 10) return res.status(429).json({ error: 'Too many requests. Try again later.' });
+  asked.set(req.ip, [...t, Date.now()]);
+  db.prepare('INSERT INTO gp_requests(gp, district, name, phone) VALUES(?,?,?,?)').run(gp, f('district'), f('name'), f('phone').replace(/[^\d+ ]/g, '').slice(0, 15));
+  res.json({ ok: true });
+});
+app.get('/api/requests', adminOnly, (_req, res) => res.json({ requests: db.prepare('SELECT * FROM gp_requests ORDER BY done, id DESC LIMIT 100').all() }));
+app.post('/api/requests/:id/done', adminOnly, (req, res) => res.json({ ok: db.prepare('UPDATE gp_requests SET done=1 WHERE id=?').run(Number(req.params.id)).changes > 0 }));
+
+app.post('/api/upload', adminOnly, upload.array('photos', 100), (req, res) => {
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'Select at least one PDF or JPG/PNG/WebP photo.' });
   const want = req.body.area === 'auto' ? 'auto' : areaOf(req);
@@ -212,13 +250,13 @@ app.post('/api/upload', upload.array('photos', 100), (req, res) => {
   res.status(202).json({ accepted: files.length, jobs: ids, message: 'Upload received. Pages are being read in the background.' });
 });
 
-app.get('/api/jobs', (_req, res) => {
+app.get('/api/jobs', adminOnly, (_req, res) => {
   const jobs = db.prepare(`SELECT j.id,j.file_name,j.kind,j.area,a.name area_name,a.district,j.status,j.total,j.done,j.failed,j.voters,j.message,j.created_at
     FROM jobs j LEFT JOIN areas a ON a.key=j.area ORDER BY j.id DESC LIMIT 20`).all();
   res.json({ jobs });
 });
 
-app.post('/api/jobs/:id/retry', (req, res) => res.json({ ok: retryJob(Number(req.params.id)) }));
+app.post('/api/jobs/:id/retry', adminOnly, (req, res) => res.json({ ok: retryJob(Number(req.params.id)) }));
 
 app.use((err, _req, res, _next) => {
   console.error(err);
