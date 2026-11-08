@@ -11,7 +11,8 @@ const ORDER = ['Karauli', 'Sawai Madhopur'];
 db.exec('CREATE TABLE IF NOT EXISTS sec_feed (file TEXT PRIMARY KEY, area TEXT, job_id INTEGER, at TEXT DEFAULT CURRENT_TIMESTAMP)');
 const fed = db.prepare('SELECT 1 FROM sec_feed WHERE file=?');
 const markFed = db.prepare('INSERT OR IGNORE INTO sec_feed(file, area, job_id) VALUES(?,?,?)');
-const hasOwnData = db.prepare("SELECT 1 FROM pages WHERE area=? AND stored_file NOT IN (SELECT stored FROM jobs WHERE id IN (SELECT job_id FROM sec_feed WHERE area=?)) LIMIT 1");
+// GPs that already had data before the feeder started (uploaded by hand) are left untouched.
+const hasOwnData = db.prepare("SELECT 1 FROM pages WHERE area=? AND NOT EXISTS (SELECT 1 FROM sec_feed WHERE area=? AND job_id IS NOT NULL) LIMIT 1");
 const titleCase = s => String(s || '').toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()).trim();
 
 function manifests() {
