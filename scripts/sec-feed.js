@@ -39,7 +39,22 @@ function busy() {
   return stuck.length > 0;
 }
 
+// Once a ward's job is done, the downloaded PDF becomes a hardlink to the uploaded copy, so it takes disk space only once.
+const doneFed = db.prepare("SELECT s.file, j.stored FROM sec_feed s JOIN jobs j ON j.id=s.job_id WHERE j.status='done'");
+function dedupe() {
+  const up = path.join(__dirname, '..', 'uploads');
+  for (const { file, stored } of doneFed.all()) {
+    const src = path.join(up, stored);
+    try {
+      if (!fs.existsSync(file) || !fs.existsSync(src) || fs.statSync(file).ino === fs.statSync(src).ino) continue;
+      fs.linkSync(src, file + '.lnk');
+      fs.renameSync(file + '.lnk', file);
+    } catch (e) { console.error(new Date().toISOString(), 'dedupe', file, e.message); }
+  }
+}
+
 async function feedOne() {
+  dedupe();
   if (busy()) return false;
   for (const m of manifests()) {
     const samiti = titleCase(m.samiti.replace(/\s*PANCHAYAT SAMITI\s*$/i, ''));
