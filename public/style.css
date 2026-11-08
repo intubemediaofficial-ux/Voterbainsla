@@ -74,3 +74,5 @@ body.noScroll{overflow:hidden}
 .jobBar i{display:block;height:100%;background:var(--blue)}
 .job.done .jobBar i{background:var(--green)}
 .jobRetry{margin-top:6px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;font-weight:800;cursor:pointer}
+.gpField{grid-column:1/-1}
+.gpField b small{font-weight:600;color:var(--muted);font-size:12px}
