@@ -1,10 +1,13 @@
+const path0 = require('path');
+// Secrets (e.g. GEMINI_API_KEYS) live outside the repo in data/.env.
+try { process.loadEnvFile(process.env.ENV_FILE || path0.join(__dirname, 'data', '.env')); } catch {}
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { db, saveExtraction, failPage, upsertPage } = require('./lib/db');
-const { extractPage } = require('./lib/ocr');
+const { db, listAreas, areaByKey, insertArea } = require('./lib/db');
+const { addJob, retryJob, startQueue } = require('./lib/ingest');
 const match = require('./lib/match');
 
 const app = express();
@@ -16,8 +19,8 @@ const upload = multer({
     destination: uploadDir,
     filename: (_req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(5).toString('hex')}${path.extname(file.originalname).toLowerCase() || '.jpg'}`)
   }),
-  limits: { fileSize: 16 * 1024 * 1024, files: 100 },
-  fileFilter: (_req, file, cb) => cb(null, /^image\/(jpeg|png|webp)$/.test(file.mimetype))
+  limits: { fileSize: 80 * 1024 * 1024, files: 100 },
+  fileFilter: (_req, file, cb) => cb(null, /^(image\/(jpeg|png|webp)|application\/pdf)$/.test(file.mimetype))
 });
 
 app.disable('x-powered-by');
@@ -33,20 +36,27 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], m
 
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
-// done: voting finished — listed in the side column. The first area not done opens on the home page.
+// Seed GPs (inserted once into the `areas` table; GPs found in uploaded PDFs are added there automatically).
+// Order = order in the menu. `home: true` opens on the home page (defaults to the first entry).
 const AREA_LIST = [
-  { key: 'ladpura', name: 'Ladpura, Surgarh', done: true, aliases: 'ladpura laadpura surgarh soorgarh लाडपुरा सूरगढ़ सुरगढ़' },
-  { key: 'kheldi', name: 'Kheldi', done: true, aliases: 'kheldi khedli khelri khedi खेलड़ी खेलडी खेडली खेड़ली' },
-  { key: 'ghudla', name: 'Ghudla', done: true, aliases: 'ghudla ghurla gudla घुड़ला घुडला' },
-  { key: 'piplai', name: 'Piplai', done: true, aliases: 'piplai pipalai peeplai pipli पिपलाई पीपलाई' }
+  { key: 'jhareesa', name: 'Jhareesa', district: 'Karauli', samiti: 'Todabhim', home: true, aliases: 'jhareesa jharisa jharesa jhareesha jharisha jhadisa झरीसा झारीसा झरिसा झरीशा झाड़ीसा झाडीसा' },
+  { key: 'ladpura', name: 'Ladpura, Surgarh', district: 'Sawai Madhopur', samiti: 'Bamanwas', aliases: 'ladpura laadpura surgarh soorgarh लाडपुरा सूरगढ़ सुरगढ़' },
+  { key: 'kheldi', name: 'Kheldi', district: 'Sawai Madhopur', samiti: 'Bamanwas', aliases: 'kheldi khedli khelri khedi खेलड़ी खेलडी खेडली खेड़ली' },
+  { key: 'ghudla', name: 'Ghudla', district: 'Sawai Madhopur', samiti: 'Bamanwas', aliases: 'ghudla ghurla gudla घुड़ला घुडला' },
+  { key: 'piplai', name: 'Piplai', district: 'Sawai Madhopur', samiti: 'Bamanwas', aliases: 'piplai pipalai peeplai pipli पिपलाई पीपलाई' }
 ];
-const AREAS = Object.fromEntries(AREA_LIST.map(a => [a.key, a.name]));
-const HOME_AREA = (AREA_LIST.find(a => !a.done) || AREA_LIST[0]).key;
-const areaOf = req => { const a = String((req.query && req.query.area) || (req.body && req.body.area) || ''); return AREAS[a] ? a : HOME_AREA; };
+AREA_LIST.forEach((a, i) => insertArea.run({ ...a, sort: i * 10 }));
+for (const a of AREA_LIST) db.prepare("UPDATE areas SET district=CASE WHEN district='' THEN ? ELSE district END, samiti=CASE WHEN samiti='' THEN ? ELSE samiti END WHERE key=?").run(a.district, a.samiti, a.key);
+if (!db.prepare('SELECT 1 FROM areas WHERE home=1').get()) db.prepare('UPDATE areas SET home=1 WHERE key=?').run((AREA_LIST.find(a => a.home) || AREA_LIST[0]).key);
+const homeArea = () => (db.prepare('SELECT key FROM areas WHERE home=1').get() || listAreas()[0] || {}).key;
+const areaOf = req => { const a = String((req.query && req.query.area) || (req.body && req.body.area) || ''); return areaByKey(a) ? a : homeArea(); };
 
 app.get('/api/areas', (_req, res) => {
   const counts = Object.fromEntries(db.prepare('SELECT area, COALESCE(SUM(record_count),0) voters FROM pages GROUP BY area').all().map(r => [r.area, r.voters]));
-  res.json({ home: HOME_AREA, areas: AREA_LIST.map(a => ({ ...a, voters: counts[a.key] || 0 })) });
+  // GPs with no voter data yet stay out of the menu, and the home page falls back to the first GP that has data.
+  const areas = listAreas().map(a => ({ key: a.key, name: a.name, district: a.district, samiti: a.samiti, aliases: a.aliases, home: !!a.home, voters: counts[a.key] || 0 })).filter(a => a.voters > 0);
+  const home = (areas.find(a => a.key === homeArea()) || areas[0] || { key: homeArea() }).key;
+  res.json({ home, areas });
 });
 
 app.get('/api/stats', (req, res) => {
@@ -54,7 +64,7 @@ app.get('/api/stats', (req, res) => {
   const row = db.prepare(`SELECT COUNT(*) pages, COALESCE(SUM(record_count),0) voters,
     COALESCE(SUM(status='processing'),0) processing, COALESCE(SUM(status='error'),0) errors FROM pages WHERE area=?`).get(area);
   const wards = db.prepare("SELECT DISTINCT ward_no FROM pages WHERE status='ready' AND ward_no<>'' AND area=? ORDER BY CAST(ward_no AS INTEGER)").all(area).map(x => x.ward_no);
-  res.json({ ...row, area, areas: AREAS, wards, slips: slipStats(area) });
+  res.json({ ...row, area, areas: Object.fromEntries(listAreas().map(a => [a.key, a.name])), wards, slips: slipStats(area) });
 });
 
 const allVoters = db.prepare(`SELECT v.*, p.total_pages, p.assembly_name, p.polling_station, p.stored_file, p.area
@@ -65,7 +75,7 @@ const alts = (main, alt) => [main, ...String(alt || '').split('|')].map(s => mat
 const best = (qw, list) => Math.max(0, ...list.map(fw => match.fieldScore(qw, fw)));
 let cache = { sig: '', rows: [] };
 function allRows() {
-  const sig = JSON.stringify(db.prepare("SELECT count(*) c, max(id) m, total(length(name)+length(coalesce(relative_name,''))+length(coalesce(name_alt,''))+length(coalesce(relative_alt,''))) l FROM voters").get());
+  const sig = JSON.stringify(db.prepare("SELECT count(*) c, max(id) m, total(length(name)+length(coalesce(relative_name,''))+length(coalesce(village,''))+length(coalesce(name_alt,''))+length(coalesce(relative_alt,''))) l FROM voters").get());
   if (sig !== cache.sig) {
     cache = { sig, rows: allVoters.all().map(v => ({ ...v, nw: alts(v.name, v.name_alt), rw: alts(v.relative_name, v.relative_alt) })) };
   }
@@ -193,26 +203,26 @@ app.get('/api/source/:id', (req, res) => {
 
 app.post('/api/upload', upload.array('photos', 100), (req, res) => {
   const files = req.files || [];
-  if (!files.length) return res.status(400).json({ error: 'Select at least one JPG, PNG or WebP photo.' });
-  const area = areaOf(req), src = f => (area === 'ladpura' ? f.originalname : `${area}/${f.originalname}`);
-  for (const file of files) {
-    const pageId = Number(upsertPage.get({ source_file: src(file), stored_file: file.filename, area }).id);
-    processPhoto(file, pageId, src(file));
-  }
-  res.status(202).json({ accepted: files.length, message: 'Photos are being indexed. You can keep using search.' });
+  if (!files.length) return res.status(400).json({ error: 'Select at least one PDF or JPG/PNG/WebP photo.' });
+  const want = req.body.area === 'auto' ? 'auto' : areaOf(req);
+  const name = f => Buffer.from(f.originalname, 'latin1').toString('utf8');
+  const pdfs = files.filter(f => f.mimetype === 'application/pdf'), photos = files.filter(f => f.mimetype !== 'application/pdf');
+  const ids = pdfs.map(f => addJob({ file_name: name(f), stored: f.filename, kind: 'pdf', want_area: want }));
+  if (photos.length) ids.push(addJob({ file_name: photos.length > 1 ? `${photos.length} photos` : name(photos[0]), stored: JSON.stringify(photos.map(f => ({ stored: f.filename, name: name(f) }))), kind: 'photos', want_area: want }));
+  res.status(202).json({ accepted: files.length, jobs: ids, message: 'Upload received. Pages are being read in the background.' });
 });
 
-async function processPhoto(file, pageId, sourceFile) {
-  try {
-    const data = await extractPage(file.path);
-    saveExtraction(sourceFile, file.filename, data);
-  } catch (err) {
-    failPage.run(String(err.message).slice(0, 1000), pageId);
-  }
-}
+app.get('/api/jobs', (_req, res) => {
+  const jobs = db.prepare(`SELECT j.id,j.file_name,j.kind,j.area,a.name area_name,a.district,j.status,j.total,j.done,j.failed,j.voters,j.message,j.created_at
+    FROM jobs j LEFT JOIN areas a ON a.key=j.area ORDER BY j.id DESC LIMIT 20`).all();
+  res.json({ jobs });
+});
+
+app.post('/api/jobs/:id/retry', (req, res) => res.json({ ok: retryJob(Number(req.params.id)) }));
 
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(400).json({ error: err.message || 'Request failed' });
 });
+startQueue();
 app.listen(PORT, '127.0.0.1', () => console.log(`Voter Search listening on http://127.0.0.1:${PORT}`));
