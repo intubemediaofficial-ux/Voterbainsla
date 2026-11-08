@@ -5,6 +5,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const crypto = require('crypto');
 const { db, listAreas, areaByKey, insertArea } = require('./lib/db');
 const { addJob, retryJob, startQueue } = require('./lib/ingest');
@@ -209,9 +210,15 @@ app.get('/api/source/:id', (req, res) => {
   const row = db.prepare('SELECT p.stored_file FROM voters v JOIN pages p ON p.id=v.page_id WHERE v.id=?').get(Number(req.params.id));
   if (!row) return res.sendStatus(404);
   const file = path.join(uploadDir, path.basename(row.stored_file));
-  if (!fs.existsSync(file)) return res.sendStatus(404);
   res.setHeader('Cache-Control', 'private, max-age=3600');
-  res.sendFile(file);
+  if (fs.existsSync(file)) return res.sendFile(file);
+  const m = /^([0-9a-f]{16})-p-(\d+)\.jpg$/.exec(path.basename(row.stored_file));
+  const pdf = m && path.join(uploadDir, `${m[1]}.pdf`);
+  if (!pdf || !fs.existsSync(pdf)) return res.sendStatus(404);
+  const n = String(Number(m[2]));
+  execFile('pdftoppm', ['-r', '150', '-jpeg', '-jpegopt', 'quality=70', '-f', n, '-l', n, '-singlefile', pdf],
+    { encoding: 'buffer', maxBuffer: 32 << 20, timeout: 60000 },
+    (e, out) => (e || !out.length ? res.sendStatus(500) : res.type('jpeg').send(out)));
 });
 
 app.get('/api/admin', (req, res) => res.json({ admin: isAdmin(req) }));

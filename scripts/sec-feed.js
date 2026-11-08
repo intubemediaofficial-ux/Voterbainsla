@@ -2,6 +2,7 @@
 // Usage: node scripts/sec-feed.js <dir with <dist>/<ps>/<gp>.json manifests and ward PDFs>
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 try { process.loadEnvFile(process.env.ENV_FILE || path.join(__dirname, '..', 'data', '.env')); } catch {}
 const auth = { 'x-admin-key': process.env.ADMIN_PASSWORD || '' };
 const { db } = require('../lib/db');
@@ -28,10 +29,14 @@ function manifests() {
 }
 
 const MIN_FREE_GB = Number(process.env.SEC_MIN_FREE_GB || 15);
+const MAX_DATA_GB = Number(process.env.SEC_MAX_DATA_GB || 5);
+const DATA = path.dirname(ROOT);
 function busy() {
-  // Each page keeps a ~300 KB source image; stop feeding before the shared server's disk fills up.
+  // Stop feeding before the shared server's disk fills up, or once the voter data folder reaches its size budget.
   const st = fs.statfsSync(ROOT);
   if (st.bavail * st.bsize < MIN_FREE_GB * 1e9) { console.error(new Date().toISOString(), `paused: under ${MIN_FREE_GB} GB free`); return true; }
+  const used = Number(execFileSync('du', ['-sb', DATA]).toString().split('\t')[0]);
+  if (used > MAX_DATA_GB * 1e9) { console.error(new Date().toISOString(), `paused: ${DATA} is over ${MAX_DATA_GB} GB`); return true; }
   if (db.prepare("SELECT 1 FROM jobs WHERE status IN ('queued','running') LIMIT 1").get()) return true;
   // Pages waiting on Gemini quota go first; the server retries them every 30 min, nudge ones past its retry cap.
   const stuck = db.prepare("SELECT id, attempts FROM jobs WHERE status='partial' AND id IN (SELECT job_id FROM sec_feed)").all();
