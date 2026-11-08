@@ -81,19 +81,25 @@ app.get('/api/stats', (req, res) => {
   res.json({ ...row, area, areas: Object.fromEntries(listAreas().map(a => [a.key, a.name])), wards, slips: slipStats(area) });
 });
 
-const allVoters = db.prepare(`SELECT v.*, p.total_pages, p.assembly_name, p.polling_station, p.stored_file, p.area
-  FROM voters v JOIN pages p ON p.id=v.page_id`);
+const areaVoters = db.prepare(`SELECT v.*, p.total_pages, p.assembly_name, p.polling_station, p.stored_file, p.area
+  FROM voters v JOIN pages p ON p.id=v.page_id WHERE p.area=?`);
+const areaSig = db.prepare(`SELECT count(*) c, max(v.id) m, total(length(v.name)+length(coalesce(v.relative_name,''))+length(coalesce(v.village,''))+length(coalesce(v.name_alt,''))+length(coalesce(v.relative_alt,''))) l
+  FROM voters v JOIN pages p ON p.id=v.page_id WHERE p.area=?`);
 
 // Each field keeps its other OCR readings (name_alt, '|' separated) so a misread spelling still finds the voter.
 const alts = (main, alt) => [main, ...String(alt || '').split('|')].map(s => match.words(s)).filter(w => w.length);
 const best = (qw, list) => Math.max(0, ...list.map(fw => match.fieldScore(qw, fw)));
-let cache = { sig: '', rows: [] };
-function allRows() {
-  const sig = JSON.stringify(db.prepare("SELECT count(*) c, max(id) m, total(length(name)+length(coalesce(relative_name,''))+length(coalesce(village,''))+length(coalesce(name_alt,''))+length(coalesce(relative_alt,''))) l FROM voters").get());
-  if (sig !== cache.sig) {
-    cache = { sig, rows: allVoters.all().map(v => ({ ...v, nw: alts(v.name, v.name_alt), rw: alts(v.relative_name, v.relative_alt) })) };
-  }
-  return cache.rows;
+// Voters are cached per Gram Panchayat (most recently used first) so memory stays bounded as districts are added.
+const CACHE_AREAS = 40;
+const cache = new Map();
+function areaRows(area) {
+  const sig = JSON.stringify(areaSig.get(area));
+  let c = cache.get(area);
+  cache.delete(area);
+  if (!c || c.sig !== sig) c = { sig, rows: areaVoters.all(area).map(v => ({ ...v, nw: alts(v.name, v.name_alt), rw: alts(v.relative_name, v.relative_alt) })) };
+  cache.set(area, c);
+  if (cache.size > CACHE_AREAS) cache.delete(cache.keys().next().value);
+  return c.rows;
 }
 const order = (x, y) => y.score - x.score || Number(x.ward_no) - Number(y.ward_no) ||
   (Number(x.page_no) || 999) - (Number(y.page_no) || 999) || Number(x.serial_no) - Number(y.serial_no);
@@ -106,8 +112,7 @@ const withSlip = () => { const m = slipMap(); return v => { const s = m.get(slip
 function slipStats(area) {
   const m = slipMap(), seen = new Set(), wards = {};
   let given = 0;
-  for (const v of allRows()) {
-    if (v.area !== area) continue;
+  for (const v of areaRows(area)) {
     const k = slipKey(v);
     const w = wards[v.ward_no] || (wards[v.ward_no] = { total: 0, given: 0, seen: new Set() });
     if (!w.seen.has(k)) { w.seen.add(k); w.total++; if (m.has(k)) w.given++; }
@@ -132,7 +137,7 @@ app.post('/api/slip', (req, res) => {
 
 app.get('/api/ward/:ward', (req, res) => {
   const ward = String(req.params.ward).trim(), area = areaOf(req);
-  const rows = allRows().filter(v => v.area === area && v.ward_no === ward).map(v => ({ ...v, score: 0 })).sort(order);
+  const rows = areaRows(area).filter(v => v.ward_no === ward).map(v => ({ ...v, score: 0 })).sort(order);
   res.json({ ward, count: rows.length, results: rows.map(withSlip()) });
 });
 
@@ -170,7 +175,7 @@ app.get('/api/search', (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 120);
   const rel = String(req.query.rel || '').trim().slice(0, 120);
   const ward = String(req.query.ward || '').trim(), area = areaOf(req);
-  const voters = () => allRows().filter(v => v.area === area && (!ward || v.ward_no === ward));
+  const voters = () => areaRows(area).filter(v => !ward || v.ward_no === ward);
   const send = (extra, rows) => res.json({ query: q, rel, ...extra, results: rows.slice(0, 160).map(withSlip()) });
   if (rel.length >= 2) {
     const rq = match.words(rel);
