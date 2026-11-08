@@ -33,15 +33,16 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], m
 
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
-// done: voting finished — listed in the side column. The first area not done opens on the home page.
+// Order = order in the menu. `home: true` opens on the home page (defaults to the first entry).
 const AREA_LIST = [
-  { key: 'ladpura', name: 'Ladpura, Surgarh', done: true, aliases: 'ladpura laadpura surgarh soorgarh लाडपुरा सूरगढ़ सुरगढ़' },
-  { key: 'kheldi', name: 'Kheldi', done: true, aliases: 'kheldi khedli khelri khedi खेलड़ी खेलडी खेडली खेड़ली' },
-  { key: 'ghudla', name: 'Ghudla', done: true, aliases: 'ghudla ghurla gudla घुड़ला घुडला' },
-  { key: 'piplai', name: 'Piplai', done: true, aliases: 'piplai pipalai peeplai pipli पिपलाई पीपलाई' }
+  { key: 'jhareesa', name: 'Jhareesa', home: true, aliases: 'jhareesa jharisa jharesa jhareesha jharisha jhareesa jhadi jari झरीसा झारीसा झरिसा झरीशा' },
+  { key: 'ladpura', name: 'Ladpura, Surgarh', aliases: 'ladpura laadpura surgarh soorgarh लाडपुरा सूरगढ़ सुरगढ़' },
+  { key: 'kheldi', name: 'Kheldi', aliases: 'kheldi khedli khelri khedi खेलड़ी खेलडी खेडली खेड़ली' },
+  { key: 'ghudla', name: 'Ghudla', aliases: 'ghudla ghurla gudla घुड़ला घुडला' },
+  { key: 'piplai', name: 'Piplai', aliases: 'piplai pipalai peeplai pipli पिपलाई पीपलाई' }
 ];
 const AREAS = Object.fromEntries(AREA_LIST.map(a => [a.key, a.name]));
-const HOME_AREA = (AREA_LIST.find(a => !a.done) || AREA_LIST[0]).key;
+const HOME_AREA = (AREA_LIST.find(a => a.home) || AREA_LIST[0]).key;
 const areaOf = req => { const a = String((req.query && req.query.area) || (req.body && req.body.area) || ''); return AREAS[a] ? a : HOME_AREA; };
 
 app.get('/api/areas', (_req, res) => {
