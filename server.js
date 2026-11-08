@@ -39,14 +39,14 @@ app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'
 // Seed GPs (inserted once into the `areas` table; GPs found in uploaded PDFs are added there automatically).
 // Order = order in the menu. `home: true` opens on the home page (defaults to the first entry).
 const AREA_LIST = [
-  { key: 'jhareesa', name: 'Jhareesa', district: 'Karauli', home: true, aliases: 'jhareesa jharisa jharesa jhareesha jharisha jhadisa झरीसा झारीसा झरिसा झरीशा झाड़ीसा झाडीसा' },
-  { key: 'ladpura', name: 'Ladpura, Surgarh', district: 'Sawai Madhopur', aliases: 'ladpura laadpura surgarh soorgarh लाडपुरा सूरगढ़ सुरगढ़' },
-  { key: 'kheldi', name: 'Kheldi', district: 'Sawai Madhopur', aliases: 'kheldi khedli khelri khedi खेलड़ी खेलडी खेडली खेड़ली' },
-  { key: 'ghudla', name: 'Ghudla', district: 'Sawai Madhopur', aliases: 'ghudla ghurla gudla घुड़ला घुडला' },
-  { key: 'piplai', name: 'Piplai', district: 'Sawai Madhopur', aliases: 'piplai pipalai peeplai pipli पिपलाई पीपलाई' }
+  { key: 'jhareesa', name: 'Jhareesa', district: 'Karauli', samiti: 'Todabhim', home: true, aliases: 'jhareesa jharisa jharesa jhareesha jharisha jhadisa झरीसा झारीसा झरिसा झरीशा झाड़ीसा झाडीसा' },
+  { key: 'ladpura', name: 'Ladpura, Surgarh', district: 'Sawai Madhopur', samiti: 'Bamanwas', aliases: 'ladpura laadpura surgarh soorgarh लाडपुरा सूरगढ़ सुरगढ़' },
+  { key: 'kheldi', name: 'Kheldi', district: 'Sawai Madhopur', samiti: 'Bamanwas', aliases: 'kheldi khedli khelri khedi खेलड़ी खेलडी खेडली खेड़ली' },
+  { key: 'ghudla', name: 'Ghudla', district: 'Sawai Madhopur', samiti: 'Bamanwas', aliases: 'ghudla ghurla gudla घुड़ला घुडला' },
+  { key: 'piplai', name: 'Piplai', district: 'Sawai Madhopur', samiti: 'Bamanwas', aliases: 'piplai pipalai peeplai pipli पिपलाई पीपलाई' }
 ];
 AREA_LIST.forEach((a, i) => insertArea.run({ ...a, sort: i * 10 }));
-for (const a of AREA_LIST) db.prepare("UPDATE areas SET district=? WHERE key=? AND district=''").run(a.district, a.key);
+for (const a of AREA_LIST) db.prepare("UPDATE areas SET district=CASE WHEN district='' THEN ? ELSE district END, samiti=CASE WHEN samiti='' THEN ? ELSE samiti END WHERE key=?").run(a.district, a.samiti, a.key);
 if (!db.prepare('SELECT 1 FROM areas WHERE home=1').get()) db.prepare('UPDATE areas SET home=1 WHERE key=?').run((AREA_LIST.find(a => a.home) || AREA_LIST[0]).key);
 const homeArea = () => (db.prepare('SELECT key FROM areas WHERE home=1').get() || listAreas()[0] || {}).key;
 const areaOf = req => { const a = String((req.query && req.query.area) || (req.body && req.body.area) || ''); return areaByKey(a) ? a : homeArea(); };
@@ -54,7 +54,7 @@ const areaOf = req => { const a = String((req.query && req.query.area) || (req.b
 app.get('/api/areas', (_req, res) => {
   const counts = Object.fromEntries(db.prepare('SELECT area, COALESCE(SUM(record_count),0) voters FROM pages GROUP BY area').all().map(r => [r.area, r.voters]));
   // GPs with no voter data yet stay out of the menu, and the home page falls back to the first GP that has data.
-  const areas = listAreas().map(a => ({ key: a.key, name: a.name, district: a.district, aliases: a.aliases, home: !!a.home, voters: counts[a.key] || 0 })).filter(a => a.voters > 0);
+  const areas = listAreas().map(a => ({ key: a.key, name: a.name, district: a.district, samiti: a.samiti, aliases: a.aliases, home: !!a.home, voters: counts[a.key] || 0 })).filter(a => a.voters > 0);
   const home = (areas.find(a => a.key === homeArea()) || areas[0] || { key: homeArea() }).key;
   res.json({ home, areas });
 });

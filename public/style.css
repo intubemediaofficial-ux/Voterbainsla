@@ -76,3 +76,7 @@ body.noScroll{overflow:hidden}
 .jobRetry{margin-top:6px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;font-weight:800;cursor:pointer}
 .gpField{grid-column:1/-1}
 .gpField b small{font-weight:600;color:var(--muted);font-size:12px}
+.gpDist{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.gpDist select{font:inherit;font-size:16px;text-transform:none;letter-spacing:0;font-weight:700;color:var(--ink);border:1px solid var(--line);background:#f8fbff;border-radius:12px;padding:11px 10px}
+div.distHead{cursor:default}div.distHead::after{content:none}
+.gpLbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 5px}
