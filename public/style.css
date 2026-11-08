@@ -30,8 +30,11 @@
 header .brand{flex:1;min-width:0}
 .drawer{position:fixed;inset:0;z-index:50}.drawer[hidden]{display:none}
 .drawerBg{position:absolute;inset:0;background:rgba(7,27,54,.5)}
-.drawerPanel{position:absolute;top:0;left:0;bottom:0;width:min(320px,86vw);background:#fff;box-shadow:8px 0 32px rgba(0,0,0,.25);display:flex;flex-direction:column;overflow:auto;animation:slideIn .18s ease-out}
+.drawerPanel{position:absolute;inset:0;width:100%;background:#fff;box-shadow:8px 0 32px rgba(0,0,0,.25);display:flex;flex-direction:column;overflow:auto;animation:slideIn .18s ease-out}
 @keyframes slideIn{from{transform:translateX(-100%)}to{transform:none}}
+.drawerPanel>*{width:100%;max-width:560px;margin-inline:auto;box-sizing:border-box}
+.drawer.closing .drawerPanel{animation:slideOut .2s ease-in forwards}
+@keyframes slideOut{to{transform:translateX(-100%)}}
 .drawerHead{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
 .drawerHead b{font-size:17px}
 .drawerX{border:0;background:none;font-size:28px;line-height:1;color:var(--muted);cursor:pointer;padding:0 4px}
