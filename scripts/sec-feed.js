@@ -27,7 +27,11 @@ function manifests() {
   return out.sort((a, b) => { const x = rank(a), y = rank(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1; return 0; });
 }
 
+const MIN_FREE_GB = Number(process.env.SEC_MIN_FREE_GB || 15);
 function busy() {
+  // Each page keeps a ~300 KB source image; stop feeding before the shared server's disk fills up.
+  const st = fs.statfsSync(ROOT);
+  if (st.bavail * st.bsize < MIN_FREE_GB * 1e9) { console.error(new Date().toISOString(), `paused: under ${MIN_FREE_GB} GB free`); return true; }
   if (db.prepare("SELECT 1 FROM jobs WHERE status IN ('queued','running') LIMIT 1").get()) return true;
   // Pages waiting on Gemini quota go first; the server retries them every 30 min, nudge ones past its retry cap.
   const stuck = db.prepare("SELECT id, attempts FROM jobs WHERE status='partial' AND id IN (SELECT job_id FROM sec_feed)").all();
