@@ -75,7 +75,7 @@ const alts = (main, alt) => [main, ...String(alt || '').split('|')].map(s => mat
 const best = (qw, list) => Math.max(0, ...list.map(fw => match.fieldScore(qw, fw)));
 let cache = { sig: '', rows: [] };
 function allRows() {
-  const sig = JSON.stringify(db.prepare("SELECT count(*) c, max(id) m, total(length(name)+length(coalesce(relative_name,''))+length(coalesce(name_alt,''))+length(coalesce(relative_alt,''))) l FROM voters").get());
+  const sig = JSON.stringify(db.prepare("SELECT count(*) c, max(id) m, total(length(name)+length(coalesce(relative_name,''))+length(coalesce(village,''))+length(coalesce(name_alt,''))+length(coalesce(relative_alt,''))) l FROM voters").get());
   if (sig !== cache.sig) {
     cache = { sig, rows: allVoters.all().map(v => ({ ...v, nw: alts(v.name, v.name_alt), rw: alts(v.relative_name, v.relative_alt) })) };
   }
