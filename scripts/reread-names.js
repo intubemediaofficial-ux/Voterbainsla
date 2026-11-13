@@ -58,11 +58,13 @@ function votes(p, readings) {
     return r && !(vid(r.voter_id) && vid(v.voter_id) && vid(r.voter_id) !== vid(v.voter_id)) ? clean(r[k]) : '';
   })) }));
 }
+// Labels are printed touching the name ("नाम:भूर"), so the colon gets read into the first letter (भ → झ) the same way on every pass.
+const firstLetterOnly = (a, b) => a.length === b.length && a[0] !== b[0] && a.slice(1) === b.slice(1);
 const winner = (old, vals) => {
   const n = new Map();
   for (const x of vals.filter(Boolean)) { const k = [...n.keys()].find(y => same(x, y)) || x; n.set(k, (n.get(k) || 0) + 1); }
   const [best, c] = [...n].sort((a, b) => b[1] - a[1])[0] || [];
-  return c >= 2 && best !== old && !(old && same(best, old)) && (!old || close(best, old)) ? best : null;
+  return c >= 2 && best !== old && !(old && same(best, old)) && (!old || (close(best, old) && !firstLetterOnly(best, old))) ? best : null;
 };
 // A third read is needed only where the first two disagree with each other and both differ from the stored text.
 const undecided = (p, readings) => votes(p, readings).some(({ v, f }) => f.some((vals, i) => {
