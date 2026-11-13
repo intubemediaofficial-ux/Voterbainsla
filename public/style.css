@@ -89,3 +89,4 @@ div.distHead{cursor:default}div.distHead::after{content:none}
 .reqForm{display:grid;gap:12px}.reqForm label{display:grid;gap:6px;font-size:13px;font-weight:700;color:var(--muted)}.reqForm input{font:inherit;font-size:16px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#f8fbff;color:var(--ink);width:100%}
 @media(max-width:400px){.hBtns{gap:6px}.hBtns .ghost{padding:8px}}
 .sheet{max-height:calc(100vh - 36px);overflow:auto}
+.homeGps{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:770px;margin:12px auto 0}.homeGps:empty{display:none}.homeGps .chip{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.3);color:#fff}.homeGps .chip.on{background:linear-gradient(135deg,#1974ff,#0757db);border-color:transparent}
