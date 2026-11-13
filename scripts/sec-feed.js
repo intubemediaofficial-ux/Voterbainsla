@@ -13,6 +13,8 @@ const PORT = process.env.PORT || 3580;
 const ORDER = ['Karauli', 'Sawai Madhopur'];
 // SEC GP codes (comma separated) to read before everything else.
 const PRIORITY = String(process.env.SEC_PRIORITY || '').split(',').map(s => s.trim()).filter(Boolean);
+// SEC_ONLY=1 feeds just the SEC_PRIORITY GPs and nothing else.
+const ONLY = process.env.SEC_ONLY === '1';
 db.exec('CREATE TABLE IF NOT EXISTS sec_feed (file TEXT PRIMARY KEY, area TEXT, job_id INTEGER, at TEXT DEFAULT CURRENT_TIMESTAMP)');
 const fed = db.prepare('SELECT 1 FROM sec_feed WHERE file=?');
 const markFed = db.prepare('INSERT OR IGNORE INTO sec_feed(file, area, job_id) VALUES(?,?,?)');
@@ -26,6 +28,7 @@ function manifests() {
     for (const p of fs.readdirSync(path.join(ROOT, d)))
       for (const f of fs.readdirSync(path.join(ROOT, d, p)).filter(f => f.endsWith('.json')))
         out.push(JSON.parse(fs.readFileSync(path.join(ROOT, d, p, f), 'utf8')));
+  if (ONLY) return out.filter(m => PRIORITY.includes(m.gp)).sort((a, b) => PRIORITY.indexOf(a.gp) - PRIORITY.indexOf(b.gp));
   const rank = m => [PRIORITY.includes(m.gp) ? PRIORITY.indexOf(m.gp) : PRIORITY.length, ORDER.indexOf(m.district), /TODABHIM|BAMANWAS/.test(m.samiti) ? 0 : 1, m.samiti, m.name];
   return out.sort((a, b) => { const x = rank(a), y = rank(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1; return 0; });
 }
