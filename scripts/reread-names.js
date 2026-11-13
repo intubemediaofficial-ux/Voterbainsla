@@ -1,4 +1,5 @@
 // Re-reads names on already-indexed pages with the zoomed exact-spelling OCR and replaces misreads; old readings stay searchable in *_alt.
+// A single re-read is noisy, so a new spelling is applied only when two independent readings agree on it (a third read breaks ties).
 // Usage: node scripts/reread-names.js <area> [area...]   (CONC=3, FORCE=1 to redo pages already re-read, PAGES=id,id to limit)
 const fs = require('fs');
 const os = require('os');
@@ -43,27 +44,56 @@ function pageImage(p) {
 
 const rowsOf = db.prepare('SELECT * FROM voters WHERE page_id=?');
 const log = fs.createWriteStream(path.join(OUT, 'changes.jsonl'), { flags: 'a' });
-function apply(p, reading) {
-  const bySerial = new Map();
-  for (const r of reading) { const s = String(r.serial_no || '').trim(); if (s && !bySerial.has(s)) bySerial.set(s, r); }
+const FIELDS = [['name', 'name_alt', 'name_norm', 'name_key'], ['relative_name', 'relative_alt', 'relative_norm', 'relative_key']];
+const bySerial = reading => {
+  const m = new Map();
+  for (const r of reading) { const s = String(r.serial_no || '').trim(); if (s && !m.has(s)) m.set(s, r); }
+  return m;
+};
+// For each stored row and field, the readings (one per pass) that belong to that box.
+function votes(p, readings) {
+  const maps = readings.map(bySerial);
+  return rowsOf.all(p.id).map(v => ({ v, f: FIELDS.map(([k]) => maps.map(m => {
+    const r = m.get(String(v.serial_no).trim());
+    return r && !(vid(r.voter_id) && vid(v.voter_id) && vid(r.voter_id) !== vid(v.voter_id)) ? clean(r[k]) : '';
+  })) }));
+}
+// Labels are printed touching the name ("नाम:भूर"), so the colon gets read into the first letter (भ → झ) the same way on every pass.
+const firstLetterOnly = (a, b) => a.length === b.length && a[0] !== b[0] && a.slice(1) === b.slice(1);
+const winner = (old, vals) => {
+  const n = new Map();
+  for (const x of vals.filter(Boolean)) { const k = [...n.keys()].find(y => same(x, y)) || x; n.set(k, (n.get(k) || 0) + 1); }
+  const [best, c] = [...n].sort((a, b) => b[1] - a[1])[0] || [];
+  return c >= 2 && best !== old && !(old && same(best, old)) && (!old || (close(best, old) && !firstLetterOnly(best, old))) ? best : null;
+};
+// A third read is needed only where the first two disagree with each other and both differ from the stored text.
+const undecided = (p, readings) => votes(p, readings).some(({ v, f }) => f.some((vals, i) => {
+  const old = v[FIELDS[i][0]] || '', [a, b] = vals;
+  return a && b && !same(a, b) && !same(a, old) && !same(b, old);
+}));
+function apply(p, readings) {
   let changed = 0;
   db.transaction(() => {
-    for (const v of rowsOf.all(p.id)) {
-      const r = bySerial.get(String(v.serial_no).trim());
-      if (!r || (vid(r.voter_id) && vid(v.voter_id) && vid(r.voter_id) !== vid(v.voter_id))) continue;
-      for (const [k, altCol, normCol, keyCol] of [['name', 'name_alt', 'name_norm', 'name_key'], ['relative_name', 'relative_alt', 'relative_norm', 'relative_key']]) {
-        const now = clean(r[k]);
-        if (!now || now === v[k] || (v[k] && same(now, v[k])) || (v[k] && !close(now, v[k]))) continue;
-        const alt = new Set(String(v[altCol] || '').split('|').filter(Boolean));
-        if (v[k]) alt.add(v[k]);
-        alt.delete(now);
-        db.prepare(`UPDATE voters SET ${k}=?, ${altCol}=?, ${normCol}=?, ${keyCol}=? WHERE id=?`).run(now, [...alt].join('|'), normText(now), anyKey(now), v.id);
-        log.write(JSON.stringify({ id: v.id, page: p.id, serial: v.serial_no, k, from: v[k], to: now }) + '\n');
-        changed++;
-      }
-    }
+    for (const { v, f } of votes(p, readings)) FIELDS.forEach(([k, altCol, normCol, keyCol], i) => {
+      const now = winner(v[k] || '', f[i]);
+      if (!now) return;
+      const alt = new Set(String(v[altCol] || '').split('|').filter(Boolean));
+      if (v[k]) alt.add(v[k]);
+      alt.delete(now);
+      db.prepare(`UPDATE voters SET ${k}=?, ${altCol}=?, ${normCol}=?, ${keyCol}=? WHERE id=?`).run(now, [...alt].join('|'), normText(now), anyKey(now), v.id);
+      log.write(JSON.stringify({ id: v.id, page: p.id, serial: v.serial_no, k, from: v[k], to: now, votes: f[i] }) + '\n');
+      changed++;
+    });
   })();
   return changed;
+}
+const readFile = (p, k) => path.join(OUT, `${p.id}.r${k}.json`);
+async function reading(p, k, file) {
+  const f = readFile(p, k);
+  if (fs.existsSync(f)) return JSON.parse(fs.readFileSync(f, 'utf8'));
+  const r = await readNames(file);
+  fs.writeFileSync(f, JSON.stringify(r));
+  return r;
 }
 
 (async () => {
@@ -73,7 +103,7 @@ function apply(p, reading) {
     ORDER BY CAST(ward_no AS INT), CAST(page_no AS INT)`).all(...areas)
     .sort((a, b) => areas.indexOf(a.area) - areas.indexOf(b.area))
     .filter(p => !process.env.PAGES || process.env.PAGES.split(',').includes(String(p.id)))
-    .filter(p => process.env.FORCE || !fs.existsSync(path.join(OUT, p.id + '.json')));
+    .filter(p => process.env.FORCE || !fs.existsSync(path.join(OUT, p.id + '.done')));
   console.log(`${pages.length} pages to re-read`);
   let i = 0, total = 0;
   const worker = async () => {
@@ -84,11 +114,12 @@ function apply(p, reading) {
       try {
         for (;;) {
           try {
-            const reading = await readNames(img.file);
-            fs.writeFileSync(path.join(OUT, p.id + '.json'), JSON.stringify(reading));
-            const n = apply(p, reading);
+            const rs = [await reading(p, 0, img.file), await reading(p, 1, img.file)];
+            if (undecided(p, rs)) rs.push(await reading(p, 2, img.file));
+            const n = apply(p, rs);
+            fs.writeFileSync(path.join(OUT, p.id + '.done'), '');
             total += n;
-            console.log(`${p.area} W${p.ward_no} P${p.page_no}: ${n} fixed (total ${total})`);
+            console.log(`${p.area} W${p.ward_no} P${p.page_no}: ${n} fixed, ${rs.length} reads (total ${total})`);
             break;
           } catch (e) {
             if (!/quota|exhausted|Gemini|demand|fetch/i.test(e.message)) { console.log(`FAIL page ${p.id}: ${e.message}`); break; }
