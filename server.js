@@ -62,13 +62,14 @@ const AREA_LIST = [
   { key: 'macchipura', name: 'Macchipura', district: 'Sawai Madhopur', samiti: 'Gangapur City', aliases: 'macchipura machhipura machipura machchhipura मच्छीपुरा मछीपुरा' },
   { key: 'meenapada', name: 'Meena Pada', district: 'Sawai Madhopur', samiti: 'Gangapur City', aliases: 'meenapada minapada meenapara minapara मीनापाडा मीणापाडा मीनापाड़ा मीणापाड़ा' },
   { key: 'hingotiya', name: 'Hingotiya', district: 'Sawai Madhopur', samiti: 'Gangapur City', aliases: 'hingotiya hingotia hingoteeya hingotya हिंगोटिया हिंगोटीया हींगोटिया हिगोटिया' },
-  { key: 'anatpura', name: 'Anatpura', district: 'Jaipur', samiti: 'Tunga', aliases: 'anatpura anantpura anatapura anatpur अणतपुरा अनंतपुरा अनतपुरा अणतपूरा' }
+  { key: 'anatpura', name: 'Anatpura', district: 'Jaipur', samiti: 'Tunga', aliases: 'anatpura anantpura anatapura anatpur अणतपुरा अनंतपुरा अनतपुरा अणतपूरा' },
+  { key: 'medi', name: 'Medi', district: 'Sawai Madhopur', samiti: 'Wajeerpur', aliases: 'medi maidi mendi meri मैडी मेडी मैड़ी मेड़ी' }
 ];
 AREA_LIST.forEach((a, i) => insertArea.run({ ...a, sort: i * 10 }));
 for (const a of AREA_LIST) db.prepare("UPDATE areas SET district=CASE WHEN district='' THEN ? ELSE district END, samiti=CASE WHEN samiti='' THEN ? ELSE samiti END WHERE key=?").run(a.district, a.samiti, a.key);
 if (!db.prepare('SELECT 1 FROM areas WHERE home=1').get()) db.prepare('UPDATE areas SET home=1 WHERE key=?').run((AREA_LIST.find(a => a.home) || AREA_LIST[0]).key);
 // GPs shown as quick buttons on the home page, in this order.
-const PINNED = ['jhareesa', 'hingotiya', 'anatpura'];
+const PINNED = ['jhareesa', 'hingotiya', 'anatpura', 'medi'];
 const homeArea = () => (db.prepare('SELECT key FROM areas WHERE home=1').get() || listAreas()[0] || {}).key;
 const areaOf = req => { const a = String((req.query && req.query.area) || (req.body && req.body.area) || ''); return areaByKey(a) ? a : homeArea(); };
 
