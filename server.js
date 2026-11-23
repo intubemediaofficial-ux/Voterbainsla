@@ -259,9 +259,9 @@ const setAdminCookie = res => res.setHeader('Set-Cookie', `adm=${adminToken()}; 
 const bodyStr = (req, k) => String((req.body && req.body[k]) || '').trim();
 const logins = new Map();
 app.post('/api/admin/login', async (req, res) => {
-  if ((logins.get(req.ip) || []).filter(x => Date.now() - x < 15 * 60e3).length >= 10) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes.' });
+  if (!tries(logins, req, 10, 15 * 60e3)) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes.' });
   const ok = adminToken() && bodyStr(req, 'email').toLowerCase() === ADMIN_EMAIL && await checkPassword(String((req.body && req.body.password) || ''));
-  if (!ok) { tries(logins, req, 10, 15 * 60e3); return res.status(401).json({ error: 'Wrong email or password.' }); }
+  if (!ok) return res.status(401).json({ error: 'Wrong email or password.' });
   setAdminCookie(res);
   res.json({ admin: true });
 });
