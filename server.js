@@ -27,7 +27,7 @@ const upload = multer({
 // Only the admin can upload rolls or see the upload queue and GP requests. The admin logs in with ADMIN_EMAIL and a password;
 // until it is reset by email OTP, the password is ADMIN_PASSWORD from data/.env, which also stays the x-admin-key for local scripts.
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'intubemediaofficial@gmail.com').trim().toLowerCase();
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'shivlalbainslaofficial@gmail.com').trim().toLowerCase();
 db.exec(`CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT)`);
 const setting = k => (db.prepare('SELECT v FROM settings WHERE k=?').get(k) || {}).v || '';
 const hashPassword = pw => { const salt = crypto.randomBytes(16).toString('hex'); return `${salt}:${crypto.scryptSync(pw, salt, 64).toString('hex')}`; };
@@ -41,7 +41,7 @@ const checkPassword = async pw => {
 const adminToken = () => {
   if (!ADMIN_PASSWORD) return '';
   const h = setting('admin_password_hash');
-  return crypto.createHmac('sha256', ADMIN_PASSWORD).update(h ? `voter-admin:${h}` : 'voter-admin').digest('hex');
+  return crypto.createHmac('sha256', ADMIN_PASSWORD).update(`voter-admin:${ADMIN_EMAIL}:${h}`).digest('hex');
 };
 const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const isLocal = req => /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '') && !req.headers['x-forwarded-for'];
