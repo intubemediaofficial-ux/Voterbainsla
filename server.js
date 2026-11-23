@@ -31,11 +31,12 @@ const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'intubemediaofficial@gmail.com')
 db.exec(`CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT)`);
 const setting = k => (db.prepare('SELECT v FROM settings WHERE k=?').get(k) || {}).v || '';
 const hashPassword = pw => { const salt = crypto.randomBytes(16).toString('hex'); return `${salt}:${crypto.scryptSync(pw, salt, 64).toString('hex')}`; };
-const checkPassword = pw => {
+const scrypt = require('util').promisify(crypto.scrypt);
+const checkPassword = async pw => {
   const h = setting('admin_password_hash');
   if (!h) return !!ADMIN_PASSWORD && same(pw, ADMIN_PASSWORD);
   const [salt, key] = h.split(':');
-  return crypto.timingSafeEqual(crypto.scryptSync(pw, salt, 64), Buffer.from(key, 'hex'));
+  return crypto.timingSafeEqual(await scrypt(pw, salt, 64), Buffer.from(key, 'hex'));
 };
 const adminToken = () => {
   if (!ADMIN_PASSWORD) return '';
@@ -257,9 +258,9 @@ const tries = (map, req, max, ms) => { const t = (map.get(req.ip) || []).filter(
 const setAdminCookie = res => res.setHeader('Set-Cookie', `adm=${adminToken()}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${180 * 86400}`);
 const bodyStr = (req, k) => String((req.body && req.body[k]) || '').trim();
 const logins = new Map();
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
   if ((logins.get(req.ip) || []).filter(x => Date.now() - x < 15 * 60e3).length >= 10) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes.' });
-  const ok = adminToken() && bodyStr(req, 'email').toLowerCase() === ADMIN_EMAIL && checkPassword(String((req.body && req.body.password) || ''));
+  const ok = adminToken() && bodyStr(req, 'email').toLowerCase() === ADMIN_EMAIL && await checkPassword(String((req.body && req.body.password) || ''));
   if (!ok) { tries(logins, req, 10, 15 * 60e3); return res.status(401).json({ error: 'Wrong email or password.' }); }
   setAdminCookie(res);
   res.json({ admin: true });
