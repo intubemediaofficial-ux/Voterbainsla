@@ -24,14 +24,33 @@ const upload = multer({
   fileFilter: (_req, file, cb) => cb(null, /^(image\/(jpeg|png|webp)|application\/pdf)$/.test(file.mimetype))
 });
 
-// Only the admin (password in data/.env as ADMIN_PASSWORD) can upload rolls or see the upload queue and GP requests.
+// Only admins can upload rolls or see the upload queue and GP requests. Each admin (ADMIN_EMAILS, comma separated) logs in with
+// their email and a password set by email OTP; until then the password is ADMIN_PASSWORD from data/.env, which also stays the
+// x-admin-key for local scripts.
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const adminToken = ADMIN_PASSWORD && crypto.createHmac('sha256', ADMIN_PASSWORD).update('voter-admin').digest('hex');
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? process.env.ADMIN_EMAIL ?? 'shivlalbainslaofficial@gmail.com,ajeetbainslaofficial@gmail.com')
+  .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+const adminEmail = e => (ADMIN_EMAILS.includes(String(e || '').trim().toLowerCase()) ? String(e).trim().toLowerCase() : '');
+db.exec(`CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT)`);
+const setting = k => (db.prepare('SELECT v FROM settings WHERE k=?').get(k) || {}).v || '';
+const pwKey = email => `admin_password_hash:${email}`;
+const hashPassword = pw => { const salt = crypto.randomBytes(16).toString('hex'); return `${salt}:${crypto.scryptSync(pw, salt, 64).toString('hex')}`; };
+const scrypt = require('util').promisify(crypto.scrypt);
+const checkPassword = async (email, pw) => {
+  const h = setting(pwKey(email));
+  if (!h) return !!ADMIN_PASSWORD && same(pw, ADMIN_PASSWORD);
+  const [salt, key] = h.split(':');
+  return crypto.timingSafeEqual(await scrypt(pw, salt, 64), Buffer.from(key, 'hex'));
+};
+const adminToken = email => ADMIN_PASSWORD && adminEmail(email)
+  ? crypto.createHmac('sha256', ADMIN_PASSWORD).update(`voter-admin:${email}:${setting(pwKey(email))}`).digest('hex') : '';
 const same = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const isLocal = req => /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '') && !req.headers['x-forwarded-for'];
 const isAdmin = req => {
-  if (!adminToken) return false;
-  const c = /(?:^|;\s*)adm=([0-9a-f]+)/.exec(req.headers.cookie || '');
-  return (c && same(c[1], adminToken)) || same(String(req.headers['x-admin-key'] || ''), ADMIN_PASSWORD);
+  if (!ADMIN_PASSWORD) return false;
+  const c = /(?:^|;\s*)adm=([A-Za-z0-9_-]+)\.([0-9a-f]+)/.exec(req.headers.cookie || '');
+  const t = c && adminToken(Buffer.from(c[1], 'base64url').toString());
+  return (t && same(c[2], t)) || (isLocal(req) && same(String(req.headers['x-admin-key'] || ''), ADMIN_PASSWORD));
 };
 const adminOnly = (req, res, next) => isAdmin(req) ? next() : res.status(401).json({ error: 'Admin login required.' });
 db.exec(`CREATE TABLE IF NOT EXISTS gp_requests (id INTEGER PRIMARY KEY, gp TEXT NOT NULL, district TEXT, name TEXT, phone TEXT, done INTEGER DEFAULT 0, at TEXT DEFAULT CURRENT_TIMESTAMP)`);
@@ -236,12 +255,58 @@ app.get('/api/source/:id', (req, res) => {
 });
 
 app.get('/api/admin', (req, res) => res.json({ admin: isAdmin(req) }));
+const tries = (map, req, max, ms) => { const t = (map.get(req.ip) || []).filter(x => Date.now() - x < ms); if (t.length >= max) return false; map.set(req.ip, [...t, Date.now()]); return true; };
+const setAdminCookie = (res, email) => res.setHeader('Set-Cookie', `adm=${Buffer.from(email).toString('base64url')}.${adminToken(email)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${180 * 86400}`);
+const bodyStr = (req, k) => String((req.body && req.body[k]) || '').trim();
 const logins = new Map();
-app.post('/api/admin/login', (req, res) => {
-  const t = (logins.get(req.ip) || []).filter(x => Date.now() - x < 15 * 60e3);
-  if (t.length >= 10) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes.' });
-  if (!adminToken || !same(String((req.body && req.body.password) || ''), ADMIN_PASSWORD)) { logins.set(req.ip, [...t, Date.now()]); return res.status(401).json({ error: 'Wrong password.' }); }
-  res.setHeader('Set-Cookie', `adm=${adminToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${180 * 86400}`);
+app.post('/api/admin/login', async (req, res) => {
+  if (!tries(logins, req, 10, 15 * 60e3)) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes.' });
+  const email = adminEmail(bodyStr(req, 'email'));
+  const h = email && setting(pwKey(email));
+  const ok = email && adminToken(email) && await checkPassword(email, String((req.body && req.body.password) || '')) && setting(pwKey(email)) === h;
+  if (!ok) return res.status(401).json({ error: 'Wrong email or password.' });
+  setAdminCookie(res, email);
+  res.json({ admin: true });
+});
+
+// Password reset: a 6-digit code is emailed (Brevo) to the admin's email; with it the admin sets a new password.
+async function sendMail(to, subject, html) {
+  if (!process.env.BREVO_API_KEY) return false;
+  try {
+    const r = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': process.env.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ sender: { name: 'Voter Search', email: process.env.MAIL_FROM || ADMIN_EMAILS[0] }, to: [{ email: to }], subject, htmlContent: html })
+    });
+    return r.ok;
+  } catch { return false; }
+}
+const otps = new Map();
+const otpAsks = new Map(), otpChecks = new Map();
+app.post('/api/admin/otp', async (req, res) => {
+  if (!ADMIN_PASSWORD) return res.status(503).json({ error: 'Admin login is not set up on this server.' });
+  const email = adminEmail(bodyStr(req, 'email'));
+  if (!email) return res.status(403).json({ error: 'This email is not an admin email.' });
+  const old = otps.get(email);
+  if (old && Date.now() - old.sent < 60e3) return res.status(429).json({ error: 'Wait 1 minute before asking for a new code.' });
+  if (!tries(otpAsks, req, 5, 3600e3)) return res.status(429).json({ error: 'Too many codes asked. Try again in 1 hour.' });
+  const code = String(crypto.randomInt(100000, 1000000));
+  otps.set(email, { hash: crypto.createHash('sha256').update(code).digest('hex'), exp: Date.now() + 10 * 60e3, sent: Date.now(), tries: 0 });
+  const sent = await sendMail(email, `Voter Search admin code: ${code}`,
+    `<div style="font-family:Arial,sans-serif;padding:20px"><h2 style="color:#1769ff">Voter Search</h2><p>Your password reset code is</p><p style="font-size:32px;letter-spacing:6px;font-weight:bold">${code}</p><p style="color:#666">Valid for 10 minutes. If you did not ask for this, ignore this email.</p></div>`);
+  if (!sent) { otps.delete(email); return res.status(502).json({ error: 'Could not send the email. Try again.' }); }
+  res.json({ ok: true });
+});
+app.post('/api/admin/reset', (req, res) => {
+  if (!tries(otpChecks, req, 10, 3600e3)) return res.status(429).json({ error: 'Too many tries. Try again in 1 hour.' });
+  const pw = String((req.body && req.body.password) || '');
+  if (pw.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+  const email = adminEmail(bodyStr(req, 'email')), otp = email && otps.get(email);
+  if (!otp || otp.exp < Date.now() || otp.tries >= 5) { if (email) otps.delete(email); return res.status(401).json({ error: 'Code expired. Ask for a new code.' }); }
+  if (!same(crypto.createHash('sha256').update(bodyStr(req, 'code')).digest('hex'), otp.hash)) { otp.tries++; return res.status(401).json({ error: 'Wrong code.' }); }
+  otps.delete(email);
+  db.prepare('INSERT INTO settings(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v').run(pwKey(email), hashPassword(pw));
+  setAdminCookie(res, email);
   res.json({ admin: true });
 });
 app.post('/api/admin/logout', (_req, res) => { res.setHeader('Set-Cookie', 'adm=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0'); res.json({ admin: false }); });
