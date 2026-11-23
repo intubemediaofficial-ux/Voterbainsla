@@ -28,7 +28,7 @@ const upload = multer({
 // their email and a password set by email OTP; until then the password is ADMIN_PASSWORD from data/.env, which also stays the
 // x-admin-key for local scripts.
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || process.env.ADMIN_EMAIL || 'shivlalbainslaofficial@gmail.com,ajeetbainslaofficial@gmail.com')
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? process.env.ADMIN_EMAIL ?? 'shivlalbainslaofficial@gmail.com,ajeetbainslaofficial@gmail.com')
   .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 const adminEmail = e => (ADMIN_EMAILS.includes(String(e || '').trim().toLowerCase()) ? String(e).trim().toLowerCase() : '');
 db.exec(`CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT)`);
