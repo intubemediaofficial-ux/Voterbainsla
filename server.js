@@ -281,6 +281,7 @@ async function sendMail(to, subject, html) {
 let otp = null;
 const otpAsks = new Map(), otpChecks = new Map();
 app.post('/api/admin/otp', async (req, res) => {
+  if (!ADMIN_PASSWORD) return res.status(503).json({ error: 'Admin login is not set up on this server.' });
   if (bodyStr(req, 'email').toLowerCase() !== ADMIN_EMAIL) return res.status(403).json({ error: 'This email is not the admin email.' });
   if (otp && Date.now() - otp.sent < 60e3) return res.status(429).json({ error: 'Wait 1 minute before asking for a new code.' });
   if (!tries(otpAsks, req, 5, 3600e3)) return res.status(429).json({ error: 'Too many codes asked. Try again in 1 hour.' });
