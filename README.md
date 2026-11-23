@@ -28,4 +28,4 @@ node server.js                                # http://127.0.0.1:3580
 - nginx: `server_name voter.bainslamusic.com; client_max_body_size 400m; location / { proxy_pass http://127.0.0.1:3580; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme; proxy_read_timeout 300s; }` with a Let's Encrypt certificate (certbot).
 
 ## Admin
-Menu → Admin login with `ADMIN_EMAIL` and the password. "Forgot or change password?" emails a 6-digit code (valid 10 minutes) to `ADMIN_EMAIL`; entering it with a new password changes the password and logs out every other admin session.
+Admins are the emails in `ADMIN_EMAILS` (default shivlalbainslaofficial@gmail.com, ajeetbainslaofficial@gmail.com). Menu → Admin login with your email and password. "Forgot or change password?" emails a 6-digit code (valid 10 minutes) to that admin; entering it with a new password sets that admin's own password and logs out their other sessions. Removing an email from `ADMIN_EMAILS` logs it out everywhere.
